@@ -1,7 +1,9 @@
 resource "local_file" "ansible_inventory" {
   content  = <<EOT
 [mongodb]
-mongodb_server ansible_host=${module.compute.private_ip} ansible_user=${var.ansible_user}
+%{ for ip in module.compute.private_ips ~}
+mongodb-${replace(ip, ".", "-")} ansible_host=${ip} ansible_user=${var.ansible_user}
+%{ endfor ~}
 
 [mongodb:vars]
 ansible_ssh_common_args='-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ProxyCommand="ssh -i ${var.ssh_key_path} -W %h:%p -q -o StrictHostKeyChecking=no ubuntu@${module.bastion.bastion_public_ip}"'
