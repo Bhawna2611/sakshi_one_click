@@ -18,12 +18,6 @@ pipeline {
     }
 
     stages {
-        stage('Clean Workspace') {
-            steps {
-                cleanWs()
-            }
-        }
-
         stage('Checkout Source') {
             steps {
                 checkout scm
@@ -77,8 +71,9 @@ pipeline {
 
     post { 
         always { 
-            // Cleanup sensitive files from the Jenkins agent
+            // Cleanup sensitive files and workspace
             sh 'rm -f /tmp/one__click.pem' 
+            cleanWs()
         }
         success {
            // Send Email notification on Success
