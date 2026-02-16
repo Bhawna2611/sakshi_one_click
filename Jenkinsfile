@@ -38,7 +38,7 @@ pipeline {
                         sh "rm -f /tmp/one__click.pem && cp ${SSH_KEY} /tmp/one__click.pem && chmod 400 /tmp/one__click.pem"
                         
                         // Added -input=false and -force-copy to stop Terraform from asking for manual input
-                        sh 'terraform init -input=false -migrate-state -force-copy'
+                        sh 'terraform init -input=false'
                         script {
                             if (params.TF_ACTION == 'apply') {
                                 sh 'terraform apply -auto-approve -input=false'
@@ -46,24 +46,6 @@ pipeline {
                                 sh 'terraform destroy -auto-approve -input=false'
                             }
                         }
-                    }
-                }
-            }
-        }
-
-        stage('Update Inventory') {
-            when { expression { params.TF_ACTION == 'apply' } }
-            steps {
-                script {
-                    withCredentials([usernamePassword(credentialsId: 'aws-keys', usernameVariable: 'AWS_ACCESS_KEY_ID', passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
-                        dir("${env.TF_DIRECTORY}") {
-                            env.BASTION_IP = sh(script: "terraform output -raw bastion_public_ip", returnStdout: true).trim()
-                            env.PRIVATE_IP = sh(script: "terraform output -raw private_instance_ip", returnStdout: true).trim()
-                        }
-                    }
-                    dir("${env.ANSIBLE_DIRECTORY}") {
-                        sh "sed -i 's/BASTION_IP_PLACEHOLDER/${env.BASTION_IP}/g' inventory.ini"
-                        sh "sed -i 's/PRIVATE_IP_PLACEHOLDER/${env.PRIVATE_IP}/g' inventory.ini"
                     }
                 }
             }
@@ -79,50 +61,14 @@ pipeline {
             }
         }
 
-        stage('Ansible Setup & Install Docker') {
+        stage('Ansible Configuration - MongoDB') {
             when { expression { params.TF_ACTION == 'apply' } }
             steps {
                 withCredentials([sshUserPrivateKey(credentialsId: 'my-server-ssh-key-v1', keyFileVariable: 'SSH_KEY')]) {
                     dir("${env.ANSIBLE_DIRECTORY}") {
-                        // Copy SSH key for Terraform to use
+                        // Copy SSH key for Ansible to use
                         sh "rm -f /tmp/one__click.pem && cp ${SSH_KEY} /tmp/one__click.pem && chmod 400 /tmp/one__click.pem"
                         sh "ansible-playbook -i inventory.ini playbook.yml --private-key=/tmp/one__click.pem -u ubuntu"
-                    }
-                }
-            }
-        }
-
-        stage('Docker setup & install MySQL') {
-            when { expression { params.TF_ACTION == 'apply' } }
-            steps {
-                withCredentials([sshUserPrivateKey(credentialsId: 'my-server-ssh-key-v1', keyFileVariable: 'SSH_KEY')]) {
-                    dir("${env.ANSIBLE_DIRECTORY}") {
-                        // Copy entire docker folder to remote server
-                        sh "ansible all -i inventory.ini -m copy -a 'src=../docker/ dest=/home/ubuntu/employee-app/' --private-key=/tmp/one__click.pem -u ubuntu"
-                        
-                        // Deploy using docker-compose
-                        sh """
-                            ansible all -i inventory.ini -m shell -a '
-                                cd /home/ubuntu/employee-app && \\
-                                sudo docker-compose down || true && \\
-                                sudo docker-compose up -d --build && \\
-                                sleep 10 && \\
-                                sudo docker-compose ps
-                            ' --become --private-key=/tmp/one__click.pem -u ubuntu
-                        """
-                        
-                        // Verify deployment
-                        sh """
-                            ansible all -i inventory.ini -m shell -a '
-                                echo "=== Checking Frontend ===" && \\
-                                curl -f http://localhost:3000 -o /dev/null -s -w "Frontend Status: %{http_code}\\n" && \\
-                                echo "=== Checking API ===" && \\
-                                curl -f http://localhost:3000/api/employees -s | head -c 100 && \\
-                                echo "" && \\
-                                echo "=== Container Status ===" && \\
-                                sudo docker-compose -f /home/ubuntu/employee-app/docker-compose.yml ps
-                            ' --private-key=/tmp/one__click.pem -u ubuntu
-                        """
                     }
                 }
             }
